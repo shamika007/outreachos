@@ -38,33 +38,36 @@ export default function App() {
   }
 
   // Read lead from URL if coming from Chrome extension
+  // Read lead from URL if coming from Chrome extension
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const leadParam = params.get("lead");
-    if (leadParam) {
-      try {
-        const lead = JSON.parse(decodeURIComponent(leadParam));
-        if (lead.name && lead.company) {
-          // Check if lead already exists
-          setLeadsRaw(existing => {
-            const alreadyExists = existing.some(l => l.linkedin === lead.linkedin && l.name === lead.name);
-            if (!alreadyExists) {
-              const updated = [...existing, { ...lead, id: Date.now() }];
-              save("oros_leads", updated);
-              setToast(`✅ ${lead.name} from ${lead.company} added!`);
-              setTimeout(() => setToast(null), 3000);
-              return updated;
-            }
-            setToast(`ℹ️ ${lead.name} already exists in leads.`);
+    const importLead = params.get("import_lead");
+
+    if (importLead === "1") {
+      const lead = {
+        name: params.get("name") || "",
+        company: params.get("company") || "",
+        linkedin: params.get("linkedin") || "",
+        notes: params.get("notes") || "",
+        status: params.get("status") || "New",
+      };
+
+      if (lead.name && lead.company) {
+        setLeadsRaw(existing => {
+          const alreadyExists = existing.some(l => l.linkedin === lead.linkedin && l.name === lead.name);
+          if (!alreadyExists) {
+            const updated = [...existing, { ...lead, id: Date.now() }];
+            save("oros_leads", updated);
+            setToast(`✅ ${lead.name} from ${lead.company} added!`);
             setTimeout(() => setToast(null), 3000);
-            return existing;
-          });
-          setPage("leads");
-          // Clean URL
-          window.history.replaceState({}, "", "/");
-        }
-      } catch (e) {
-        console.error("Failed to parse lead from URL", e);
+            return updated;
+          }
+          setToast(`ℹ️ ${lead.name} already exists in leads.`);
+          setTimeout(() => setToast(null), 3000);
+          return existing;
+        });
+        setPage("leads");
+        window.history.replaceState({}, "", "/");
       }
     }
   }, []);
