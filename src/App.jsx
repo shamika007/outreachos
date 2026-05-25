@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Generator from "./pages/Generator";
 import Leads from "./pages/Leads";
 import History from "./pages/History";
@@ -27,6 +27,7 @@ export default function App() {
   const [history, setHistoryRaw] = useState(() => load("oros_history", []));
   const [leads, setLeadsRaw] = useState(() => load("oros_leads", []));
   const [calendar, setCalendarRaw] = useState(() => load("oros_calendar", {}));
+  const [toast, setToast] = useState(null);
 
   function setHistory(v) { const next = typeof v === "function" ? v(history) : v; setHistoryRaw(next); save("oros_history", next); }
   function setLeads(v) { const next = typeof v === "function" ? v(leads) : v; setLeadsRaw(next); save("oros_leads", next); }
@@ -36,8 +37,54 @@ export default function App() {
     setHistory(h => [...h, { ...post, id: Date.now() }]);
   }
 
+  // Read lead from URL if coming from Chrome extension
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const leadParam = params.get("lead");
+    if (leadParam) {
+      try {
+        const lead = JSON.parse(decodeURIComponent(leadParam));
+        if (lead.name && lead.company) {
+          // Check if lead already exists
+          setLeadsRaw(existing => {
+            const alreadyExists = existing.some(l => l.linkedin === lead.linkedin && l.name === lead.name);
+            if (!alreadyExists) {
+              const updated = [...existing, { ...lead, id: Date.now() }];
+              save("oros_leads", updated);
+              setToast(`✅ ${lead.name} from ${lead.company} added!`);
+              setTimeout(() => setToast(null), 3000);
+              return updated;
+            }
+            setToast(`ℹ️ ${lead.name} already exists in leads.`);
+            setTimeout(() => setToast(null), 3000);
+            return existing;
+          });
+          setPage("leads");
+          // Clean URL
+          window.history.replaceState({}, "", "/");
+        }
+      } catch (e) {
+        console.error("Failed to parse lead from URL", e);
+      }
+    }
+  }, []);
+
   return (
     <div className="layout">
+      {/* Toast notification */}
+      {toast && (
+        <div style={{
+          position: "fixed", top: 20, right: 20, zIndex: 999,
+          background: "#1a1a2e", color: "#fff",
+          padding: "12px 20px", borderRadius: 10,
+          fontSize: 13, fontWeight: 500,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+          animation: "fadeIn 0.3s ease"
+        }}>
+          {toast}
+        </div>
+      )}
+
       <aside className="sidebar">
         <div className="sidebar-logo">
           <span className="sidebar-logo-icon">🚀</span>
