@@ -1,14 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Generator from "./pages/Generator";
 import Leads from "./pages/Leads";
 import History from "./pages/History";
 import Calendar from "./pages/Calendar";
+import Analytics from "./pages/Analytics";
 
 const NAV = [
   { id: "generator", label: "Content Generator", icon: "✨" },
   { id: "leads", label: "Lead Tracker", icon: "👥" },
   { id: "history", label: "Post History", icon: "📋" },
   { id: "calendar", label: "Content Calendar", icon: "📅" },
+  { id: "analytics", label: "Analytics", icon: "📊" },
 ];
 
 function load(key, fallback) {
@@ -63,6 +65,7 @@ export default function App() {
         {page === "leads" && <Leads leads={leads} setLeads={setLeads} />}
         {page === "history" && <History history={history} setHistory={setHistory} />}
         {page === "calendar" && <Calendar history={history} calendar={calendar} setCalendar={setCalendar} />}
+        {page === "analytics" && <Analytics leads={leads} history={history} />}
       </main>
     </div>
   );
