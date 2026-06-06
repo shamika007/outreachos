@@ -6,64 +6,70 @@ const STATUS_CLASS = { New: "status-new", Contacted: "status-contacted", Replied
 const GRADE_COLOR = { Hot: "#dc2626", Warm: "#d97706", Cold: "#6b7280" };
 const GRADE_BG = { Hot: "#fef2f2", Warm: "#fef9c3", Cold: "#f3f4f6" };
 
-function getGeminiKey() {
-  try { return JSON.parse(localStorage.getItem("oros_settings") || "{}").geminiKey || ""; }
-  catch { return ""; }
-}
+// ── Groq API helpers ────────────────────────────────────
+async function callGroq(prompt) {
+  const key = import.meta.env.VITE_GROQ_API_KEY;
+  if (!key) throw new Error("No Groq API key found in .env file.");
 
-async function callGemini(prompt) {
-  const key = getGeminiKey();
-  if (!key) throw new Error("No Gemini API key. Go to ⚙️ Settings and add your Gemini key.");
-
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 600 }
-      })
-    }
-  );
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 600,
+      temperature: 0.4,
+    }),
+  });
 
   if (!resp.ok) {
     const err = await resp.json();
-    throw new Error(err.error?.message || "Gemini API error");
+    throw new Error(err.error?.message || "Groq API error");
   }
 
   const data = await resp.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+  return data.choices?.[0]?.message?.content?.trim() || "";
 }
 
-async function scrapeProfileWithGemini(linkedinUrl) {
-  const prompt = `Visit this LinkedIn profile URL and extract the person's professional information: ${linkedinUrl}
+async function scrapeProfileWithGroq(linkedinUrl) {
+  // Extract username from URL for context
+  const username = linkedinUrl.replace(/\/$/, "").split("/").pop() || "";
+  const readableName = username.replace(/-/g, " ").replace(/\d+/g, "").trim();
 
-Return ONLY a valid JSON object with no markdown, no backticks:
+  const prompt = `You are a LinkedIn profile analyst. Based on this LinkedIn profile URL and username, generate a realistic and detailed professional profile for outreach purposes.
+
+LinkedIn URL: ${linkedinUrl}
+Username/handle: ${username}
+Inferred name hint: ${readableName}
+
+Generate a realistic profile. Return ONLY valid JSON, no markdown, no backticks:
 {
-  "name": "full name",
-  "title": "current job title",
-  "company": "current company name",
+  "name": "inferred full name from username",
+  "title": "likely current job title based on their handle",
+  "company": "likely company name if inferable, else empty string",
   "seniority": "one of: Junior, Mid, Senior, Manager, Director, VP, C-Suite, Founder",
   "company_size": "one of: 1-10, 10-50, 50-200, 200-1000, 1000+",
-  "location": "city, country",
-  "about": "2-3 sentence summary of their bio",
-  "recent_activity": "any recent posts or activity",
+  "location": "likely location if inferable, else empty string",
+  "about": "2-3 sentence professional summary",
+  "recent_activity": "",
   "skills": ["skill1", "skill2", "skill3"]
 }`;
 
-  const result = await callGemini(prompt);
+  const result = await callGroq(prompt);
   const clean = result.replace(/```json|```/g, "").trim();
   return JSON.parse(clean);
 }
 
-async function scoreLeadWithGemini(lead) {
-  const prompt = `You are a strict B2B sales analyst for an AI automation startup.
+async function scoreLeadWithGroq(lead) {
+  const prompt = `You are a strict B2B sales analyst for an AI automation startup that helps businesses save time on manual outreach and content creation.
 
-Score this lead based on their real profile data:
+Score this lead for outreach potential based on their profile data:
 Name: ${lead.name}
 Title: ${lead.title || "unknown"}
-Company: ${lead.company}
+Company: ${lead.company || "unknown"}
 Seniority: ${lead.seniority || "unknown"}
 Company Size: ${lead.company_size || "unknown"}
 Location: ${lead.location || "unknown"}
@@ -72,21 +78,27 @@ Recent Activity: ${lead.recent_activity || "none"}
 Skills: ${Array.isArray(lead.skills) ? lead.skills.join(", ") : "none"}
 Notes: ${lead.notes || "none"}
 
-Be strict and realistic. A random person with no context should score 3-4. Only genuine decision makers at relevant companies score 8+.
+Scoring rules (be realistic and strict):
+- C-Suite, Founder, VP at small/mid company = 7-9
+- Manager/Director at relevant company = 5-7
+- Junior or unknown seniority = 2-4
+- No data available = 3
+- Only give 9-10 if they are clearly a decision maker at a company that needs AI automation
 
 Return ONLY valid JSON, no markdown:
 {
   "score": <number 1-10>,
   "grade": "<Hot or Warm or Cold>",
-  "reason": "<2 specific sentences referencing their actual data>",
-  "best_angle": "<one specific personalized outreach angle based on their profile>"
+  "reason": "<2 specific sentences using their actual data to justify the score>",
+  "best_angle": "<one specific personalized outreach angle based on their role and company>"
 }`;
 
-  const result = await callGemini(prompt);
+  const result = await callGroq(prompt);
   const clean = result.replace(/```json|```/g, "").trim();
   return JSON.parse(clean);
 }
 
+// ── Components ────────────────────────────────────────────
 function ScoreBadge({ score, grade }) {
   if (!score) return null;
   return (
@@ -111,7 +123,7 @@ function LeadModal({ lead, onClose, onSave }) {
     if (!form.linkedin) { setScrapeError("Enter a LinkedIn URL first."); return; }
     setScraping(true); setScrapeError(null);
     try {
-      const data = await scrapeProfileWithGemini(form.linkedin);
+      const data = await scrapeProfileWithGroq(form.linkedin);
       setForm(f => ({
         ...f,
         name: data.name || f.name,
@@ -142,7 +154,7 @@ function LeadModal({ lead, onClose, onSave }) {
             </button>
           </div>
           {scrapeError && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>⚠️ {scrapeError}</div>}
-          <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Paste LinkedIn URL → Auto-fill → Gemini reads the full profile</div>
+          <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Paste LinkedIn URL → Auto-fill → AI infers profile details</div>
         </div>
 
         <div className="form-row">
@@ -186,7 +198,7 @@ function LeadModal({ lead, onClose, onSave }) {
 
         <div className="form-group">
           <label className="label">About / Bio</label>
-          <textarea rows={2} value={form.about || ""} onChange={e => set("about", e.target.value)} placeholder="Auto-filled from profile..." />
+          <textarea rows={2} value={form.about || ""} onChange={e => set("about", e.target.value)} placeholder="Auto-filled or type manually..." />
         </div>
 
         <div className="form-group">
@@ -260,7 +272,7 @@ function ScoreModal({ lead, onClose, onScored }) {
 
   async function handleScore() {
     setLoading(true); setError(null);
-    try { const res = await scoreLeadWithGemini(lead); setResult(res); onScored(res); }
+    try { const res = await scoreLeadWithGroq(lead); setResult(res); onScored(res); }
     catch (err) { setError(err.message); }
     setLoading(false);
   }
@@ -270,11 +282,11 @@ function ScoreModal({ lead, onClose, onScored }) {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h3 className="modal-title">🎯 Score Lead — {lead.name}</h3>
         <p style={{ fontSize: 13, color: "#888", marginBottom: 12 }}>
-          Gemini analyzes real profile data and gives an accurate score.
+          AI analyzes profile data and gives a realistic score.
           {!lead.title && !lead.about && <span style={{ color: "#d97706" }}> ⚠️ Use Auto-fill first for best results.</span>}
         </p>
         {!result && !loading && <button className="btn btn-primary btn-full" onClick={handleScore}>🎯 Score this lead</button>}
-        {loading && <p style={{ color: "#888", fontSize: 14, textAlign: "center", padding: "1rem" }}>🎯 Gemini is analyzing...</p>}
+        {loading && <p style={{ color: "#888", fontSize: 14, textAlign: "center", padding: "1rem" }}>🎯 Analyzing lead...</p>}
         {error && <div className="error-box">⚠️ {error}</div>}
         {result && (
           <div>
@@ -332,7 +344,7 @@ export default function Leads({ leads, setLeads }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
         <div>
           <h2 className="page-title">Lead Tracker</h2>
-          <p className="page-sub">AI scraping + scoring powered by Gemini. Free, accurate, fast.</p>
+          <p className="page-sub">AI-powered scoring and outreach — free with Groq.</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <select value={sortBy} onChange={e => setSortBy(e.target.value)}
